@@ -1,9 +1,14 @@
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config()
+const SSLCommerzPayment = require('sslcommerz-lts');
+require('dotenv').config();
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const app = express();
 const port = process.env.PORT || 5000;
+
+const store_id = process.env.STORE_ID;
+const store_passwd = process.env.STORE_PASSWORD;
+const is_live = false //true for live, false for sandbox
 
 // middleware
 app.use(cors());
@@ -17,6 +22,7 @@ async function run() {
     try {
         await client.connect();
         const productCollection = client.db('emaJohn').collection('product');
+        const orderCollection = client.db('emaJohn').collection('orders');
 
         app.get('/product', async (req, res) => {
             const page = parseInt(req.query.page);
@@ -35,6 +41,7 @@ async function run() {
             res.send(products);
         });
 
+
         app.get('/productCount', async (req, res) => {
             const count = await productCollection.estimatedDocumentCount();
             res.send({ count });
@@ -47,10 +54,99 @@ async function run() {
             const query = { _id: { $in: ids } }
             const cursor = productCollection.find(query);
             const products = await cursor.toArray();
-            console.log(keys);
             res.send(products);
-        })
+        });
 
+
+        app.post('/order', async (req, res) => {
+            const order = req.body;
+            const { productPrice, name, phone, email, currency, postCode, address } = order;
+            const transactionId = new ObjectId().toString();
+
+            const data = {
+                total_amount: productPrice,
+                currency: currency,
+                tran_id: transactionId, // use unique tran_id for each api call
+                success_url: `${process.env.SERVER_URL}/payment/success?transactionId=${transactionId}`,
+                fail_url: `${process.env.SERVER_URL}/payment/fail?transactionId=${transactionId}`,
+                cancel_url: 'http://localhost:3030/cancel',
+                ipn_url: 'http://localhost:3030/ipn',
+                shipping_method: 'Courier',
+                product_name: 'Computer.',
+                product_category: 'Electronic',
+                product_profile: 'general',
+                cus_name: name,
+                cus_email: email,
+                cus_add1: address,
+                cus_add2: 'Dhaka',
+                cus_city: 'Dhaka',
+                cus_state: 'Dhaka',
+                cus_postcode: '1000',
+                cus_country: 'Bangladesh',
+                cus_phone: phone,
+                cus_fax: '01711111111',
+                ship_name: 'Customer Name',
+                ship_add1: 'Dhaka',
+                ship_add2: 'Dhaka',
+                ship_city: 'Dhaka',
+                ship_state: 'Dhaka',
+                ship_postcode: postCode,
+                ship_country: 'Bangladesh',
+            };
+
+            const sslcz = new SSLCommerzPayment(store_id, store_passwd, is_live);
+            sslcz.init(data).then(apiResponse => {
+                // Redirect the user to payment gateway
+                let GatewayPageURL = apiResponse.GatewayPageURL;
+                orderCollection.insertOne({
+                    ...order,
+                    transactionId,
+                    paid: false,
+                })
+                res.send({ url: GatewayPageURL });
+            });
+        });
+
+
+        app.post('/payment/success', async (req, res) => {
+            const { transactionId } = req.query;
+
+            if (!transactionId) {
+                return res.redirect(`${process.env.CLIENT_URL}/payment/fail`)
+            }
+
+            const updatedDoc = {
+                $set: {
+                    paid: true,
+                    paidAt: new Date()
+                }
+            }
+
+            const result = await orderCollection.updateOne({ transactionId }, updatedDoc);
+            if (result.modifiedCount > 0) {
+                res.redirect(`${process.env.CLIENT_URL}/payment/success?transactionId=${transactionId}`)
+            }
+        });
+
+
+        app.post('/payment/fail', async (req, res) => {
+            const { transactionId } = req.query;
+
+            if (!transactionId) {
+                return res.redirect(`${process.env.CLIENT_URL}/payment/fail`);
+            }
+
+            const result = await orderCollection.deleteOne({ transactionId });
+            if (result.deletedCount) {
+                res.redirect(`${process.env.CLIENT_URL}/payment/fail`);
+            }
+        });
+
+        app.get('/order/by-transaction-id/:id', async (req, res) => {
+            const { id } = req.params;
+            const order = await orderCollection.findOne({ transactionId: id });
+            res.send(order);
+        });
 
 
     }
@@ -65,5 +161,5 @@ app.get('/', (req, res) => {
 })
 
 app.listen(port, () => {
-    console.log('listing on port', port);
+    console.log('ema john app listing on port', port);
 })
