@@ -1,5 +1,6 @@
 # ema-john-server-side
 
 #second time deploy
-vercel
-vercel --prod
+
+1. vercel   
+2. vercel --prod
