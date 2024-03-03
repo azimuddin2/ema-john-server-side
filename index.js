@@ -20,32 +20,28 @@ const client = new MongoClient(uri, { useNewUrlParser: true, useUnifiedTopology:
 
 async function run() {
     try {
-        await client.connect();
         const productCollection = client.db('emaJohn').collection('product');
         const orderCollection = client.db('emaJohn').collection('orders');
 
-        app.get('/product', async (req, res) => {
-            const page = parseInt(req.query.page);
-            const size = parseInt(req.query.size);
-
-            const query = {};
-            const cursor = productCollection.find(query);
-            let products;
-            if (page || size) {
-                products = await cursor.skip(page * size).limit(size).toArray();
-            }
-            else {
-                products = await cursor.toArray();
-            }
-
-            res.send(products);
-        });
-
-
+        // product related api
         app.get('/productCount', async (req, res) => {
-            const count = await productCollection.estimatedDocumentCount();
-            res.send({ count });
+            const result = await productCollection.estimatedDocumentCount();
+            res.send({ productCount: result });
         });
+
+        app.get('/product', async (req, res) => {
+            const page = parseInt(req.query.page) || 0;
+            const size = parseInt(req.query.size) || 9;
+            const skip = page * size;
+
+            let cursor;
+            if (page || size) {
+                cursor = productCollection.find();
+            }
+            const result = await cursor.skip(skip).limit(size).toArray();
+            res.send(result);
+        });
+
 
         // use post to get products by ids
         app.post('/productByKeys', async (req, res) => {
@@ -58,6 +54,7 @@ async function run() {
         });
 
 
+        // orders related api
         app.post('/order', async (req, res) => {
             const order = req.body;
             const { productPrice, name, phone, email, currency, postCode, address } = order;
@@ -107,7 +104,6 @@ async function run() {
             });
         });
 
-
         app.post('/payment/success', async (req, res) => {
             const { transactionId } = req.query;
 
@@ -127,7 +123,6 @@ async function run() {
                 res.redirect(`${process.env.CLIENT_URL}/payment/success?transactionId=${transactionId}`)
             }
         });
-
 
         app.post('/payment/fail', async (req, res) => {
             const { transactionId } = req.query;
